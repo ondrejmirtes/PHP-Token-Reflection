@@ -16,7 +16,7 @@
 namespace TokenReflection\Broker\Backend;
 
 use TokenReflection;
-use TokenReflection\Stream\FileStream, TokenReflection\Exception, TokenReflection\Broker, TokenReflection\Php, TokenReflection\Dummy;
+use TokenReflection\Stream\FileStream, TokenReflection\Exception, TokenReflection\Broker, TokenReflection\Php, TokenReflection\Dummy, TokenReflection\Broker\TokenStreamStorage;
 
 /**
  * Memory broker backend.
@@ -63,9 +63,9 @@ class Memory implements Broker\Backend
 	/**
 	 * Token streams storage.
 	 *
-	 * @var array
+	 * @var \TokenReflection\Broker\TokenStreamStorage
 	 */
-	private $tokenStreams = array();
+	private $tokenStreamStorage;
 
 	/**
 	 * Processed files storage.
@@ -87,6 +87,14 @@ class Memory implements Broker\Backend
 	 * @var boolean
 	 */
 	private $storingTokenStreams;
+
+	/**
+	 * @param \TokenReflection\Broker\TokenStreamStorage $tokenStreamStorage
+	 */
+	public function __construct(TokenStreamStorage $tokenStreamStorage)
+	{
+		$this->tokenStreamStorage = $tokenStreamStorage;
+	}
 
 	/**
 	 * Returns if a file with the given filename has been processed.
@@ -433,7 +441,16 @@ class Memory implements Broker\Backend
 	 */
 	public function isFileProcessed($fileName)
 	{
-		return isset($this->tokenStreams[Broker::getRealPath($fileName)]);
+		$realpath = Broker::getRealPath($fileName);
+		$is = $this->tokenStreamStorage->has($realpath);
+		if ($is && !isset($this->files[$realpath])) {
+			$tokens = $this->tokenStreamStorage->get($realpath);
+			$this->addFile(
+				$tokens,
+				new \TokenReflection\ReflectionFile($tokens, $this->getBroker())
+			);
+		}
+		return $is;
 	}
 
 	/**
@@ -446,11 +463,12 @@ class Memory implements Broker\Backend
 	public function getFileTokens($fileName)
 	{
 		$realName = Broker::getRealPath($fileName);
-		if (!isset($this->tokenStreams[$realName])) {
+		if (!$this->tokenStreamStorage->has($realName)) {
 			throw new Exception\BrokerException($this->getBroker(), sprintf('File "%s" was not processed yet.', $fileName), Exception\BrokerException::DOES_NOT_EXIST);
 		}
 
-		return true === $this->tokenStreams[$realName] ? new FileStream($realName) : $this->tokenStreams[$realName];
+		$object = $this->tokenStreamStorage->get($realName);
+		return true === $object ? new FileStream($realName) : $object;
 	}
 
 	/**
@@ -462,7 +480,10 @@ class Memory implements Broker\Backend
 	 */
 	public function addFile(TokenReflection\Stream\StreamBase $tokenStream, TokenReflection\ReflectionFile $file)
 	{
-		$this->tokenStreams[$file->getName()] = $this->storingTokenStreams ? $tokenStream : true;
+		$this->tokenStreamStorage->set(
+			$file->getName(),
+			$this->storingTokenStreams ? $tokenStream : true
+		);
 		$this->files[$file->getName()] = $file;
 
 		$errors = array();
